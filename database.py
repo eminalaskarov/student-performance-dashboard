@@ -1,5 +1,34 @@
+import sqlite3
 import pyodbc
 from config import DB_DRIVER, DB_NAME, DB_SERVER
+
+
+def get_sqlite_connection():
+    conn = sqlite3.connect("university.db", check_same_thread=False)
+    cursor = conn.cursor()
+    cursor.execute(
+        """
+        CREATE TABLE IF NOT EXISTS Students (
+            Id INTEGER PRIMARY KEY AUTOINCREMENT,
+            Name TEXT NOT NULL,
+            Score REAL NOT NULL
+        )
+    """
+    )
+    cursor.execute("SELECT COUNT(*) FROM Students")
+    if cursor.fetchone()[0] == 0:
+        sample_students = [
+            ("Ali", 85),
+            ("Leyla", 72),
+            ("Murad", 48),
+            ("Aysel", 91),
+            ("Kamran", 63),
+        ]
+        cursor.executemany(
+            "INSERT INTO Students (Name, Score) VALUES (?, ?)", sample_students
+        )
+    conn.commit()
+    return conn
 
 
 def create_connection():
@@ -9,16 +38,16 @@ def create_connection():
             f"SERVER={DB_SERVER};"
             f"DATABASE={DB_NAME};"
             "Trusted_Connection=yes;"
-            "TrustServerCertificate=yes;"
+            "TrustServerCertificate=yes;",
+            timeout=2,
         )
-        return conn
-    except Exception as e:
-        print(f"Database error: {e}")
-        return None
+        return ("odbc", conn)
+    except Exception:
+        return ("sqlite", get_sqlite_connection())
 
 
 def add_student(name: str, score: float):
-    conn = create_connection()
+    db_type, conn = create_connection()
     if conn:
         cursor = conn.cursor()
         query = "INSERT INTO Students (Name, Score) VALUES (?, ?)"
@@ -28,7 +57,7 @@ def add_student(name: str, score: float):
 
 
 def get_students(search_term: str = ""):
-    conn = create_connection()
+    db_type, conn = create_connection()
     students = []
     if conn:
         cursor = conn.cursor()
@@ -47,12 +76,17 @@ def get_students(search_term: str = ""):
 
 
 def get_student(student_id: int):
-    conn = create_connection()
+    db_type, conn = create_connection()
     student = None
     if conn:
         cursor = conn.cursor()
-        query = "EXEC GetStudentResult @StudentId = ?"
-        cursor.execute(query, (student_id,))
+        if db_type == "odbc":
+            query = "EXEC GetStudentResult @StudentId = ?"
+            cursor.execute(query, (student_id,))
+        else:
+            query = "SELECT Id, Name, Score FROM Students WHERE Id = ?"
+            cursor.execute(query, (student_id,))
+
         row = cursor.fetchone()
         if row:
             student = {"Id": row[0], "Name": row[1], "Score": row[2]}
